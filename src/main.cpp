@@ -9,12 +9,16 @@
 int mainLoop() {
     auto running = true;
 
-    for (std::optional<SDL_Event> o; (o = sdl::waitEvent()) && running;) {
+    for (std::optional<SDL_Event> o; (o = sdl::waitEvent());) {
         auto event = *o;
 
         switch (event.type) {
         case SDL_QUIT:
             running = false;
+            break;
+        }
+
+        if (!running) {
             break;
         }
     }
@@ -100,6 +104,64 @@ sdl::Surface errorDiffusingDither(sdl::SurfaceView surface) {
     return ns;
 }
 
+struct Matrix {
+    std::vector<uint8_t> data;
+    int width;
+    int height;
+};
+
+Matrix createBayerMatrix() {
+    auto matrix = Matrix{
+        .data = std::vector<uint8_t>(6 * 6),
+        .width = 6,
+        .height = 6,
+    };
+
+    auto area = matrix.width * matrix.height;
+
+    for (int y = 0; y < matrix.height; ++y) {
+        for (int x = 0; x < matrix.width; ++x) {
+            auto data =
+                (x * matrix.width - y * (matrix.height - 1) + area) % area;
+
+            // Implementation not finished. Do this... some time
+            matrix.data.at(y * matrix.width + x) = data * 255 / area;
+            std::cout << data << " ";
+        }
+        std::cout << "\n";
+    }
+    std::cout << std::endl;
+    return matrix;
+}
+
+sdl::Surface orderedDither(sdl::SurfaceView surface, const Matrix &matrix) {
+    auto ns = surface.duplicate();
+
+    int depth = surface->format->BytesPerPixel;
+
+    auto matrixArea = matrix.width * matrix.height;
+
+    ns.lock();
+    for (int y = 0; y < ns->h; ++y) {
+        for (int x = 0; x < ns->w; ++x) {
+            auto bx = x % matrix.width;
+            auto by = y % matrix.height;
+            auto bp =
+                matrix.data.at(by * matrix.width + bx) * (255 / matrixArea);
+
+            auto intensity =
+                (ns.pixelData(x, y, 0, depth) + ns.pixelData(x, y, 1, depth) +
+                 ns.pixelData(x, y, 2, depth)) /
+                3;
+            ns.pixelData(x, y, 0, depth) = ns.pixelData(x, y, 1, depth) =
+                ns.pixelData(x, y, 2, depth) = (intensity > bp) * 255;
+        }
+    }
+    ns.unlock();
+
+    return ns;
+}
+
 int main(int argc, char *argv[]) {
     auto window = sdl::Window("dither",
                               SDL_WINDOWPOS_UNDEFINED,
@@ -117,6 +179,43 @@ int main(int argc, char *argv[]) {
         std::terminate();
     }
 
+    auto dotsMatrix = Matrix{
+        .data =
+            {
+                // clang-format off
+        34, 29, 17, 21, 30, 35,
+        28, 14,  9, 16, 20, 31,
+        13,  8,  4,  5, 15, 19,
+        12,  3,  0,  1, 10, 18,
+        27,  7,  2,  6, 23, 24,
+        33, 26, 11, 22, 25, 32,
+                // clang-format on
+            },
+        .width = 6,
+        .height = 6,
+    };
+
+    // https://en.wikipedia.org/wiki/Ordered_dithering
+    auto bayerMatrix = Matrix{
+        .data =
+            {
+                // clang-format off
+                0, 32,  8, 40,  2, 34, 10, 42,
+                48, 16, 56, 24, 50, 18, 58, 26,
+                12, 44,  4, 36, 14, 46,  6, 38,
+                60, 28, 52, 20, 62, 30, 54, 22,
+                3, 35, 11, 43,  1, 33,  9, 41,
+                51, 19, 59, 27, 49, 17, 57, 25,
+                15, 47,  7, 39, 13, 45,  5, 37,
+                63, 31, 55, 23, 61, 29, 53, 21,
+                // clang-format on
+            },
+        .width = 8,
+        .height = 8,
+    };
+
+    //    auto bayerMatrix = createBayerMatrix();
+
     auto screen = window.surface();
 
     auto ditherSurface = randDither({surface});
@@ -126,6 +225,10 @@ int main(int argc, char *argv[]) {
     auto errorDiffused = errorDiffusingDither({surface});
     IMG_SavePNG(errorDiffused, "Lenna-error-dithered.png");
     screen.blitScaled({errorDiffused});
+
+    auto ordered = orderedDither({surface}, bayerMatrix);
+    IMG_SavePNG(ordered, "Lenna-ordered-dither.png");
+    screen.blitScaled({ordered});
 
     window.updateSurface();
 
