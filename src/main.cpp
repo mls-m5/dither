@@ -21,6 +21,34 @@ int mainLoop() {
     return 0;
 }
 
+sdl::Surface randDither(sdl::SurfaceView surface) {
+    auto ditherSurface = surface.duplicate();
+
+    ditherSurface.lock();
+
+    auto p = reinterpret_cast<uint8_t *>(ditherSurface->pixels);
+
+    auto depth = ditherSurface->format->BytesPerPixel;
+
+    for (int y = 0; y < ditherSurface->h; ++y) {
+        for (int x = 0; x < ditherSurface->w; ++x) {
+            auto value =
+                (ditherSurface.pixelData(x, y, 1, depth) > (rand() % 255)) *
+                255;
+
+            ditherSurface.pixelData(x, y, 0, depth) = value;
+            ditherSurface.pixelData(x, y, 1, depth) = value;
+            ditherSurface.pixelData(x, y, 2, depth) = value;
+        }
+    }
+
+    ditherSurface.unlock();
+
+    return ditherSurface;
+}
+
+sdl::Surface errorCorrectingDither(sdl::SurfaceView surface) {}
+
 int main(int argc, char *argv[]) {
     auto window = sdl::Window("dither",
                               SDL_WINDOWPOS_UNDEFINED,
@@ -38,33 +66,12 @@ int main(int argc, char *argv[]) {
         std::terminate();
     }
 
-    auto s1 = surface.duplicate();
+    auto ditherSurface = randDither({surface});
 
-    s1.lock();
-
-    auto p = reinterpret_cast<uint8_t *>(s1->pixels);
-
-    auto depth = s1->format->BytesPerPixel;
-
-    for (int y = 0; y < s1->h; ++y) {
-        for (int x = 0; x < s1->w; ++x) {
-            auto value = (s1.pixelData(x, y, 1, depth) > (rand() % 255)) * 255;
-
-            s1.pixelData(x, y, 0, depth) = value;
-            s1.pixelData(x, y, 1, depth) = value;
-            s1.pixelData(x, y, 2, depth) = value;
-        }
-    }
-
-    s1.unlock();
+    IMG_SavePNG(ditherSurface, "Lenna-rand-dithered.png");
 
     auto screen = window.surface();
-
-    screen.blitScaled({s1});
-    //    screen.blit({s1});
-
-    IMG_SavePNG(s1, "Lenna-rand-dithered.png");
-
+    screen.blitScaled({ditherSurface});
     window.updateSurface();
 
     return mainLoop();
